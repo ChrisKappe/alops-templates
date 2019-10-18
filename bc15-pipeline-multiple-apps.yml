@@ -1,0 +1,115 @@
+name: $(Build.BuildId)
+
+variables:
+  AppVersion: '1.0.[yyyyWW].*'
+  MainAppFolderName: '<Main App Folder name>'
+  TestAppFolderName: '<Test App Folder name>'
+
+  # $(licenseFile) is defined outside of this file
+  BCLicenseFile: $(licenseFile)
+
+steps:
+
+# Create Docker container
+
+- task: ALOpsDockerStart@1
+  inputs:
+    docker_image: mcr.microsoft.com/businesscentral/sandbox
+    docker_pull: false
+
+- task: ALOpsDockerWait@1
+  inputs:
+    search_string: 'Ready for connections!'   
+
+# Import developer license
+
+- task: ALOpsLicenseImport@1
+  displayName: 'ALOps License Import'
+  inputs:
+    usedocker: true
+    license_path: $(BCLicenseFile)
+
+# Publish Test App packages first before compilation
+
+- task: ALOpsAppPublish@1
+  displayName: 'Publish Test App packages'
+  inputs:
+    usedocker: true
+    skip_verification: true 
+    installaltesttool: true    
+    install_al_app_names: |
+     Tests-TestLibraries
+     System Application Test
+     System Application Test Library
+     Any
+     Library Assert
+     Test Runner
+
+# Compile Main App
+
+- task: ALOpsAppCompiler@1
+  displayName: 'Compile Main App'
+  inputs:
+    usedocker: true
+    nav_app_version: $(AppVersion)
+    failed_on_warnings: true    
+    targetproject: ./$(MainAppFolderName)/app.json     
+
+# Publish Main App
+
+- task: ALOpsAppPublish@1
+  displayName: 'Publish Main App'
+  inputs:
+    usedocker: true
+    nav_artifact_app_filter: '*.app'   
+    skip_verification: true 
+
+# Compile Test App
+
+- task: ALOpsAppCompiler@1
+  displayName: 'Compile Test App'
+  inputs:
+    usedocker: true
+    nav_app_version: $(AppVersion)
+    failed_on_warnings: true    
+    targetproject: ./$(TestAppFolderName)/app.json 
+
+# Publish Test App
+
+- task: ALOpsAppPublish@1
+  displayName: 'Publish Test App'
+  inputs:
+    usedocker: true
+    nav_artifact_app_filter: '*.app'   
+    skip_verification: true     
+
+# Run automated tests
+
+- task: ALOpsAppTest@1
+  displayName: 'Run TestSuite'
+  inputs:
+    usedocker: true
+    show_available_tests: false
+    import_testtoolkit: false
+    installaltesttool: false
+    testpage: '130455'   
+    failed_test_action: Warning
+  continueOnError: true    
+
+# Publish Test Results
+
+- task: PublishTestResults@2
+  displayName: 'Publish Test Results **/TestResults.xml'
+  inputs:
+    testResultsFormat: XUnit
+    testResultsFiles: '**/TestResults.xml'
+    testRunTitle: 'BC Test Results: $(Build.BuildId)'
+
+# Remove Docker container
+
+- task: ALOpsDockerRemove@1
+  displayName: 'Remove Docker Container'
+  inputs:
+    usedocker: true
+  enabled: true
+  condition: always()
